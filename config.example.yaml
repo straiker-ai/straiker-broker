@@ -1,0 +1,30 @@
+# Straiker Broker. Every value can also be a flag (straiker-broker run -h) or a BROKER_*
+# environment variable; flags win, then the environment, then this file.
+
+# Your Straiker org id.
+tenant: "1234"
+
+# The targets this broker may reach - nothing else, ever. One entry per host; port 443 if omitted.
+# Straiker reaches a target as https://<host>.brk.straiker.ai/... (http:// for port 80); the broker
+# prints each one at start.
+allow:
+  - chat.corp.internal                 # port 443
+  # - { host: api.corp.internal, port: 8080 }
+
+# Optional. Defaults to Straiker's relay and its pinned host key.
+# env: prod
+# relay: wss://broker.prod.straiker.ai
+# host_key: "ssh-ed25519 AAAA..."
+
+# Optional: where this broker keeps its private key (generated on first start; keep it).
+# state_dir: /var/lib/straiker-broker
+
+# Optional: a CA to trust besides the system store, e.g. your egress proxy's inspection CA.
+# The proxy itself comes from HTTPS_PROXY.
+# ca_file: /etc/straiker/corp-proxy-ca.pem
+
+# Optional: one JSON line per connection - when, where, bytes. Default: <state_dir>/connections.jsonl
+# audit_log: /var/log/straiker/connections.jsonl
+
+# Optional: links to the relay, for more concurrent traffic (1..16).
+# fanout: 1
