@@ -1,0 +1,32 @@
+[Unit]
+Description=Straiker Broker
+Documentation=https://github.com/straiker-ai/straiker-broker
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# Edit /etc/straiker/broker.yaml (your org id and allowlist), then: systemctl enable --now straiker-broker
+ExecStart=/usr/bin/straiker-broker run -c /etc/straiker/broker.yaml
+Environment=BROKER_STATE_DIR=/var/lib/straiker-broker
+DynamicUser=yes
+StateDirectory=straiker-broker
+StateDirectoryMode=0700
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,170 @@
+name: release
+
+# The one way to release: Run workflow in the Actions tab, on main, with a version. Once a code owner approves,
+# the workflow tags the head of main and publishes. A tag pushed by hand starts nothing, and a release created on
+# the Releases page can't work: it is immutable from the moment it is published, before any file exists.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release from the head of main: v1.2.3-rc.1 for a candidate, v1.2.3 for the release"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# One release at a time.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.version }}
+
+jobs:
+  binaries:
+    # macOS: codesign and notarytool exist only there. Go cross-compiles every other platform from it.
+    runs-on: macos-14
+    # Signing keys and the tap App's key are secrets of this environment - never repo secrets, which any
+    # branch's workflow could read. Only main may use it (so this file always runs as reviewed), and only once a
+    # code owner other than the person who started the run approves it.
+    environment: release
+    permissions:
+      contents: write     # the GitHub release
+      id-token: write     # Sigstore signing of the build provenance
+      attestations: write
+    env:
+      # The `release` environment's secrets. Windows signing is optional: skipped when absent.
+      # macOS: Straiker's Developer ID certificate, and the Apple ID that notarizes. Required on a tag.
+      REQUIRE_MACOS_SIGNING: "1"
+      MACOS_APP_P12: ${{ secrets.MACOS_APP_P12 }}                 # Developer ID Application, base64 .p12
+      MACOS_APP_P12_PASSWORD: ${{ secrets.MACOS_APP_P12_PASSWORD }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}       # app-specific password, for notarytool
+      # A secret, not a variable: job env is printed in every step's log, and this repo's logs are public.
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      JSIGN_STORETYPE: ${{ secrets.JSIGN_STORETYPE }}             # Windows Authenticode via a cloud HSM
+      JSIGN_KEYSTORE: ${{ secrets.JSIGN_KEYSTORE }}
+      JSIGN_STOREPASS: ${{ secrets.JSIGN_STOREPASS }}
+      JSIGN_ALIAS: ${{ secrets.JSIGN_ALIAS }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Tag the head of main now, after approval: a run nobody approved leaves no tag.
+      - name: tag main
+        run: scripts/release-tag.sh "$TAG"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The changelog runs from the previous formal release. Left to itself, goreleaser takes the nearest older
+      # tag, which for a release is its own candidate on the same commit: an empty changelog.
+      - name: previous release
+        run: |
+          base="${TAG%%-*}"   # v1.2.3 for v1.2.3 and for v1.2.3-rc.1
+          prev=$({ git tag -l 'v*' | grep -vF -e -; echo "$base"; } | sort -uV | awk -v b="$base" '$0 == b { print p; exit } { p = $0 }')
+          echo "GORELEASER_PREVIOUS_TAG=$prev" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: install jsign
+        if: env.JSIGN_STORETYPE != ''
+        run: brew install jsign
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      - name: create the signing keychain
+        run: scripts/macos-keychain.sh create
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # This run's tag. A release and its candidate share a commit (docs/releasing.md), and left to choose,
+          # goreleaser takes the highest tag on it - git sorts v1.2.3-rc.1 above v1.2.3 - so the release would
+          # build as, and try to publish into, the candidate's immutable release.
+          GORELEASER_CURRENT_TAG: ${{ env.TAG }}
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.deb
+            dist/*.rpm
+            dist/*.sbom.json
+            dist/checksums.txt
+      # Last, once every asset and its provenance exist: the repository's immutable releases lock it from here.
+      - name: publish the release
+        run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The release pipeline is the only writer of straiker-ai/homebrew-tap. After publish, so a cask never
+      # points at a draft release's downloads (.goreleaser.yaml only generates them). Required on a release
+      # tag, so a missing App fails the job instead of leaving the tap behind; prerelease tags skip both steps.
+      # The token is the tap-publisher GitHub App's: contents write on homebrew-tap only, for this job only.
+      - name: token for the Homebrew tap
+        id: tap-token
+        if: ${{ !contains(env.TAG, '-') }}
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.TAP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
+          owner: straiker-ai
+          repositories: homebrew-tap
+          permission-contents: write
+      - name: publish the Homebrew casks
+        if: ${{ !contains(env.TAG, '-') }}
+        run: scripts/publish-casks.sh "$TAG"
+        env:
+          GH_TOKEN: ${{ steps.tap-token.outputs.token }}
+      - name: delete the signing keychain
+        if: always()
+        run: scripts/macos-keychain.sh delete
+
+  image:
+    # After the approved, signed binaries: a run nobody approved publishes nothing.
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/straiker-ai/straiker-broker
+          tags: |
+            type=semver,pattern={{version}},value=${{ env.TAG }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.TAG }}
+      - id: commit
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # An SBOM and full build provenance, attached to the image for registry scanners.
+          sbom: true
+          provenance: mode=max
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ steps.commit.outputs.short }}
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/straiker-ai/straiker-broker
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true

@@ -1,0 +1,152 @@
+# Release: signed, checksummed, attested binaries for every platform, plus the package-manager
+# manifests. Every publish step that needs a credential is skipped when that credential is absent,
+# so a snapshot build (`goreleaser release --snapshot --clean`) works anywhere.
+version: 2
+project_name: straiker-broker
+
+before:
+  hooks:
+    - go mod verify
+    # The license and NOTICE texts of everything linked in, shipped in every archive and package.
+    - sh scripts/third-party-notices.sh THIRD_PARTY_NOTICES ./cmd/straiker-broker
+
+builds:
+  - id: straiker-broker
+    main: ./cmd/straiker-broker
+    binary: straiker-broker
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }} -X main.commit={{ .ShortCommit }}
+    mod_timestamp: "{{ .CommitTimestamp }}" # reproducible: same commit, same bytes
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    hooks:
+      post: &sign
+        # Authenticode-signs Windows binaries when signing is configured; a no-op otherwise.
+        - cmd: sh scripts/sign-windows.sh "{{ .Path }}"
+          output: true
+        # Developer ID-signs and notarizes darwin binaries on a macOS runner with the keychain set up
+        # (scripts/macos-keychain.sh); a no-op elsewhere, and a failure on a tag (REQUIRE_MACOS_SIGNING).
+        - cmd: bash scripts/sign-macos.sh "{{ .Path }}" "{{ .Os }}"
+          output: true
+
+archives:
+  - id: straiker-broker
+    ids: [straiker-broker]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, THIRD_PARTY_NOTICES, README.md, config.example.yaml]
+
+checksum:
+  name_template: checksums.txt
+  extra_files:
+    - glob: .vex/*.openvex.json
+
+# An SPDX SBOM per archive (syft), published beside it, in checksums.txt and in the build provenance.
+sboms:
+  - artifacts: archive
+
+nfpms:
+  - id: packages
+    ids: [straiker-broker]
+    package_name: straiker-broker
+    vendor: Straiker
+    homepage: https://github.com/straiker-ai/straiker-broker
+    maintainer: Straiker <support@straiker.ai>
+    description: Outbound-only agent that lets Straiker reach AI apps in a private network.
+    license: Apache-2.0
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    contents:
+      - src: packaging/straiker-broker.service
+        dst: /usr/lib/systemd/system/straiker-broker.service
+      - src: LICENSE
+        dst: /usr/share/doc/straiker-broker/LICENSE
+      - src: THIRD_PARTY_NOTICES
+        dst: /usr/share/doc/straiker-broker/THIRD_PARTY_NOTICES
+      - src: config.example.yaml
+        dst: /etc/straiker/broker.yaml
+        type: config|noreplace
+        file_info:
+          mode: 0644
+
+# Homebrew: a cask in straiker-ai/homebrew-tap (brew install straiker-ai/tap/straiker-broker).
+# Generated only (dist/homebrew/Casks): release.yml pushes them to the tap after it publishes the
+# release (scripts/publish-casks.sh), since a cask pushed here would point at a draft release's
+# downloads, which 404 until publish - and forever if the job fails before it.
+homebrew_casks:
+  - name: straiker-broker
+    ids: [straiker-broker]
+    homepage: https://github.com/straiker-ai/straiker-broker
+    description: Outbound-only agent that lets Straiker reach AI apps in your network
+    license: Apache-2.0
+    repository:
+      owner: straiker-ai
+      name: homebrew-tap
+    skip_upload: true
+
+scoops:
+  - name: straiker-broker
+    ids: [straiker-broker]
+    homepage: https://github.com/straiker-ai/straiker-broker
+    description: Outbound-only agent that lets Straiker reach AI apps in your network
+    license: Apache-2.0
+    repository:
+      owner: straiker-ai
+      name: scoop-bucket
+    # Generated only: straiker-ai/scoop-bucket doesn't exist yet, and an upload here would point at the
+    # draft release (see homebrew_casks). Publish it after the release, as the casks are, once it does.
+    skip_upload: true
+
+winget:
+  - name: StraikerBroker
+    ids: [straiker-broker]
+    publisher: Straiker
+    package_identifier: Straiker.StraikerBroker
+    short_description: Outbound-only agent that lets Straiker reach AI apps in your network
+    license: Apache-2.0
+    publisher_url: https://www.straiker.ai
+    homepage: https://github.com/straiker-ai/straiker-broker
+    repository:
+      owner: straiker-ai
+      name: winget-pkgs
+      branch: "straiker-broker-{{ .Version }}"
+      pull_request:
+        enabled: true
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
+    # Generated only: the straiker-ai/winget-pkgs fork doesn't exist yet, and the PR would point at the
+    # draft release (see homebrew_casks). Publish it after the release, as the casks are, once it does.
+    skip_upload: true
+
+release:
+  github:
+    owner: straiker-ai
+    name: straiker-broker
+  # Immutable releases: everything goes up to a draft; release.yml publishes it last, and then it cannot change.
+  draft: true
+  replace_existing_draft: true
+  # A tag with a pre-release part (v1.2.3-rc.1) is published as a GitHub pre-release: never "Latest", so
+  # /releases/latest and download links stay on the last formal release.
+  prerelease: auto
+  # Stop before building and signing when the release can't be published (e.g. one already exists for the tag
+  # and is immutable), instead of failing at the upload minutes later.
+  preflight:
+    fail_on_error: true
+  # OpenVEX: findings a scanner reports that do not apply, and why (trivy --vex <file>).
+  extra_files:
+    - glob: .vex/*.openvex.json
+  footer: |
+    Verify a download: `gh attestation verify <file> --repo straiker-ai/straiker-broker`
+    and check it against `checksums.txt`.
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^ci:", "^chore:"]

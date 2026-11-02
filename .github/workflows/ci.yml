@@ -1,0 +1,132 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Weekly, so a vulnerability published after a release surfaces without waiting for a commit.
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - name: test
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then go test ./...; else go test -race ./...; fi
+
+  # `service install` on a real Windows machine: the StraikerBroker service starts as its virtual account, writes its
+  # log in the key's directory (the ACL grant works), and goes away on uninstall. It dials only dev's relay.
+  windows-service:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: install, run, uninstall
+        shell: pwsh
+        run: |
+          go build -o straiker-broker.exe ./cmd/straiker-broker
+          $dir = Join-Path $env:RUNNER_TEMP "broker-state"
+          ./straiker-broker.exe service install --org 1 --env dev --allow example.com --state-dir $dir
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Start-Sleep -Seconds 5
+          $st = ./straiker-broker.exe service status
+          $st
+          $log = Join-Path $dir "connections.jsonl"
+          if ("$st" -notmatch "running" -or -not (Select-String -Path $log -Pattern '"event":"identity"' -Quiet)) {
+            Get-Content $log -ErrorAction SilentlyContinue; exit 1
+          }
+          Get-Content $log
+          ./straiker-broker.exe service uninstall
+          if ($LASTEXITCODE -ne 0 -or "$(./straiker-broker.exe service status)" -notmatch "not installed") { exit 1 }
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: go mod tidy
+        run: go mod tidy && git diff --exit-code go.mod go.sum
+      # With the Go that releases build with (go.mod's toolchain), not the action's "stable": that one scanned
+      # clean while v0.1.5 shipped with 14 standard-library vulnerabilities.
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  # The parser that takes input from --allow, the config file and the environment, under Go's native fuzzer
+  # for 30s each. Their seed corpora already run in `go test`; this explores beyond them.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: fuzz
+        run: |
+          for target in \
+            pkg/config:FuzzParseForwards; do
+            go test "./${target%%:*}" -run '^$' -fuzz "^${target#*:}\$" -fuzztime 30s
+          done
+
+  # The release, minus publishing: every archive, package and manifest still builds.
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish
+      # What a customer's scanner sees: every binary the release would ship, as built, against .vex/.
+      - name: govulncheck the binaries
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          GOVULNCHECK="$(go env GOPATH)/bin/govulncheck" scripts/vulncheck-binaries.sh dist/straiker-broker_*/straiker-broker*
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false

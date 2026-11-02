@@ -1,0 +1,205 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// testProfile is a neutral profile: the package is shared by every Straiker agent, so it is tested with none of theirs.
+var testProfile = &Profile{
+	Name:      "agent-x",
+	EnvPrefix: "X_",
+	Environments: map[string]Environment{
+		"prod": {Relay: "wss://relay.prod.example/t", HostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMk8CisV24CYS6k/jtJCKqtwmUyFXsWrG1h+R7Z6P7KM"},
+		"dev":  {Relay: "wss://relay.dev.example/t", HostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAOhB7/zzhC+HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4"},
+	},
+	DefaultEnv:   "prod",
+	TargetSuffix: "tgt.example",
+	ConfigFile:   "/etc/straiker/x.yaml",
+	SystemState:  "/var/lib/agent-x",
+}
+
+func noEnv(string) string { return "" }
+
+func writeConfig(t *testing.T, body string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestAFileConfig(t *testing.T) {
+	p := writeConfig(t, `
+tenant: 1234
+relay: wss://relay.example/tunnel
+host_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMk8CisV24CYS6k/jtJCKqtwmUyFXsWrG1h+R7Z6P7KM
+state_dir: /tmp/state
+fanout: 2
+allow:
+  - { host: Chat.Corp.Internal., port: 443 }
+  - api.corp:8080
+`)
+	c, err := Load(testProfile, p, Overrides{}, noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Tenant != "1234" {
+		t.Errorf("an unquoted numeric org id is still the string %q, got %q", "1234", c.Tenant)
+	}
+	if c.Relay != "wss://relay.example/tunnel" || c.Fanout != 2 || c.StateDir != "/tmp/state" {
+		t.Errorf("unexpected %+v", c)
+	}
+	if c.AuditLog != filepath.Join("/tmp/state", "connections.jsonl") {
+		t.Errorf("audit log defaults beside the state, got %s", c.AuditLog)
+	}
+	want := []Forward{{"chat.corp.internal", 443}, {"api.corp", 8080}}
+	if len(c.Forwards) != 2 || c.Forwards[0] != want[0] || c.Forwards[1] != want[1] {
+		t.Errorf("forwards %v, want %v", c.Forwards, want)
+	}
+}
+
+func TestFlagsOverrideEnvOverridesFile(t *testing.T) {
+	p := writeConfig(t, "tenant: '1'\nrelay: wss://file/t\nfanout: 2\nallow: [ 'a.corp:1' ]\n")
+	env := map[string]string{"X_TENANT": "2", "X_RELAY": "wss://env/t", "X_FANOUT": "3"}
+	c, err := Load(testProfile, p, Overrides{Tenant: "3", Allow: []string{"b.corp:2"}}, func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Tenant != "3" || c.Relay != "wss://env/t" || c.Fanout != 3 || c.Forwards[0].Host != "b.corp" {
+		t.Errorf("precedence flag > env > file broken: %+v", c)
+	}
+}
+
+func TestNoFileAndNoRelayUsesTheBuiltInEnvironment(t *testing.T) {
+	c, err := Load(testProfile, "", Overrides{Tenant: "1234", Allow: []string{"chat.corp:443"}}, noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Relay != testProfile.Environments[testProfile.DefaultEnv].Relay {
+		t.Errorf("relay %s, want the %s relay", c.Relay, testProfile.DefaultEnv)
+	}
+	if c.StateDir == "" || c.AuditLog == "" {
+		t.Error("state dir and audit log need defaults")
+	}
+	if _, err := Load(testProfile, "", Overrides{Tenant: "1", Env: "nowhere", Allow: []string{"h:1"}}, noEnv); err == nil {
+		t.Error("an unknown environment is refused")
+	}
+}
+
+func TestEachEnvironmentPinsItsOwnRelayKey(t *testing.T) {
+	for name, e := range testProfile.Environments {
+		c, err := Load(testProfile, "", Overrides{Tenant: "1", Env: name, Allow: []string{"h:1"}}, noEnv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Relay != e.Relay || c.HostKey != e.HostKey || c.HostKey == "" {
+			t.Errorf("%s: relay %s key %q, want its own relay and pinned key", name, c.Relay, c.HostKey)
+		}
+		// Naming the relay instead of the environment still pins that relay's key.
+		c, err = Load(testProfile, "", Overrides{Tenant: "1", Relay: e.Relay, Allow: []string{"h:1"}}, noEnv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.HostKey != e.HostKey {
+			t.Errorf("%s: --relay %s pinned %q, want %q", name, e.Relay, c.HostKey, e.HostKey)
+		}
+	}
+}
+
+func TestABadConfigIsRefused(t *testing.T) {
+	long := strings.Repeat("a", 90) + ".corp:443"
+	cases := []struct {
+		name string
+		o    Overrides
+		want string
+	}{
+		{"no org id", Overrides{Relay: "wss://x/t", Allow: []string{"h:1"}}, "tenant"},
+		{"bad org id", Overrides{Tenant: "a b", Relay: "wss://x/t", Allow: []string{"h:1"}}, "tenant"},
+		{"plain https relay", Overrides{Tenant: "1", Relay: "https://x/", Allow: []string{"h:1"}}, "wss://"},
+		{"no allowlist", Overrides{Tenant: "1", Relay: "wss://x/t"}, "at least one"},
+		{"empty port", Overrides{Tenant: "1", Relay: "wss://x/t", Allow: []string{"h:"}}, "allow[0]"},
+		{"path in host", Overrides{Tenant: "1", Relay: "wss://x/t", Allow: []string{"../../etc:443"}}, "invalid forward"},
+		{"tilde in host", Overrides{Tenant: "1", Relay: "wss://x/t", Allow: []string{"a~b:443"}}, "invalid forward"},
+		{"port out of range", Overrides{Tenant: "1", Relay: "wss://x/t", Allow: []string{"h:70000"}}, "invalid forward"},
+		{"same host twice", Overrides{Tenant: "1", Relay: "wss://x/t", Allow: []string{"h:443", "H:80"}}, "one allow entry"},
+		{"fanout too high", Overrides{Tenant: "1", Relay: "wss://x/t", Fanout: 99, Allow: []string{"h:1"}}, "fanout must be"},
+		{"host too long for a socket", Overrides{Tenant: "1", Relay: "wss://x/t", Allow: []string{long}}, "too long"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(testProfile, "", tc.o, noEnv)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestAMissingNamedFileIsAnError(t *testing.T) {
+	if _, err := Load(testProfile, filepath.Join(t.TempDir(), "nope.yaml"), Overrides{Tenant: "1", Allow: []string{"h:1"}}, noEnv); err == nil {
+		t.Fatal("a config file that was named but is missing must not be ignored")
+	}
+}
+
+func TestAHostAloneMeansPort443(t *testing.T) {
+	p := writeConfig(t, "tenant: '1'\nallow:\n  - { host: a.corp }\n  - b.corp\n  - c.corp:8080\n")
+	c, err := Load(testProfile, p, Overrides{}, noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Forward{{"a.corp", 443}, {"b.corp", 443}, {"c.corp", 8080}}
+	for i, f := range want {
+		if c.Forwards[i] != f {
+			t.Fatalf("forwards %v, want %v", c.Forwards, want)
+		}
+	}
+	c, err = Load(testProfile, "", Overrides{Tenant: "1", Allow: []string{"chat.corp.internal"}}, noEnv)
+	if err != nil || c.Forwards[0] != (Forward{"chat.corp.internal", 443}) {
+		t.Fatalf("a flag with no port: %v %v", c, err)
+	}
+}
+
+func TestTheTargetURLForATarget(t *testing.T) {
+	c := &Config{Profile: testProfile}
+	for f, want := range map[Forward]string{
+		{"chat.corp.internal", 443}: "https://chat.corp.internal.tgt.example",
+		{"api.corp", 8443}:          "https://api.corp.tgt.example",
+		{"plain.corp", 80}:          "http://plain.corp.tgt.example",
+	} {
+		if got := c.TargetURL(f); got != want {
+			t.Errorf("%v: %s, want %s", f, got, want)
+		}
+	}
+}
+
+func TestAllowFromTheEnvironment(t *testing.T) {
+	c, err := Load(testProfile, "", Overrides{Tenant: "1"}, func(k string) string {
+		return map[string]string{"X_ALLOW": "a.corp:443, b.corp:80"}[k]
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Forwards) != 2 || c.Forwards[1] != (Forward{"b.corp", 80}) {
+		t.Fatalf("got %v", c.Forwards)
+	}
+}
+
+func TestEachHalfOfCheckDropsOneRequirement(t *testing.T) {
+	c, err := Load(testProfile, "", Overrides{Tenant: "1", NoAllow: true}, noEnv)
+	if err != nil || len(c.Forwards) != 0 {
+		t.Fatalf("check tunnel needs no allowlist: %v", err)
+	}
+	if _, err := Load(testProfile, "", Overrides{Allow: []string{"h:1"}, NoTenant: true}, noEnv); err != nil {
+		t.Fatalf("check app needs no org: %v", err)
+	}
+	if _, err := Load(testProfile, "", Overrides{Tenant: "a b", Allow: []string{"h:1"}, NoTenant: true}, noEnv); err == nil {
+		t.Fatal("an org that is given is still validated")
+	}
+	if _, err := Load(testProfile, "", Overrides{Tenant: "1", Allow: []string{"h:"}, NoAllow: true}, noEnv); err == nil {
+		t.Fatal("an allowlist that is given is still validated")
+	}
+}
