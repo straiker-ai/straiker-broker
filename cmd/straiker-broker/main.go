@@ -36,7 +36,7 @@ Usage:
   straiker-broker check connection [flags]
                                           only this machine to Straiker (no -allow needed)
   straiker-broker check app [flags]       only this machine to your apps (no -org needed)
-  straiker-broker key                     print this broker's key, to register in the Straiker console
+  straiker-broker key                     print this broker's key, to give your Straiker contact
   straiker-broker service install [flags]
                                           keep it running as a service (same flags as run): Windows service,
                                           macOS LaunchAgent, or Linux systemd user service

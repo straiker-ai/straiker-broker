@@ -21,7 +21,7 @@ func TestKeyPrintsTheBlobToPaste(t *testing.T) {
 	if !strings.HasPrefix(key, "AAAAC3NzaC1lZDI1NTE5") || strings.Contains(key, " ") {
 		t.Fatalf("want the bare ed25519 blob, got %q", key)
 	}
-	if !strings.Contains(errOut.String(), "Straiker console") {
+	if !strings.Contains(errOut.String(), "Straiker contact") {
 		t.Fatalf("the hint goes to stderr: %q", errOut.String())
 	}
 	out.Reset()
