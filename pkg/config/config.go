@@ -34,7 +34,7 @@ type Profile struct {
 	Environments map[string]Environment // built in, so a customer configures only their org id and allowlist
 	DefaultEnv   string                 // used when neither a relay nor an environment is given
 	TargetSuffix string                 // the domain Straiker reaches a target under: <host>.<suffix>
-	Register     string                 // what the customer does with the agent's key, e.g. "register it in the Straiker console"
+	Register     string                 // what the customer does with the agent's key, e.g. "give it to your Straiker contact"
 	ConfigFile   string                 // the config file read when none is named (Linux and macOS)
 	SystemState  string                 // the key's directory for a Linux service running as root
 }

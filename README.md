@@ -12,7 +12,7 @@ Straiker products ──► Straiker relay ◄──── outbound HTTPS (WebSo
         └──────────────────── TLS end to end, Straiker to your (HTTPS) app ─────────────────┘
 ```
 
-> **Status: in development.** Only the `dev` environment is built in, so nothing here is for production use yet.
+> **Status: early access.** `prod` is the default environment; `stage` and `dev` are built in for Straiker's own testing.
 > The service this agent connects to lives in `straiker-ai/platform` (`services/broker`).
 
 - **Outbound only.** The broker dials out to Straiker's relay on 443, through your proxy if you have one.
@@ -90,8 +90,8 @@ sleeps, or a virtual desktop that resets at logoff, drops the connection.
    and logs it (`{"event":"identity", ... "agent_key":"AAAAC3Nz..."}`). Until step 4 it logs `waiting` once a
    minute: expected. The key survives restarts and upgrades; it changes only if the state directory is lost.
 
-4. **Register the key** with Straiker: in the Straiker console under **Connect > Straiker Broker**, paste the
-   `agent_key` for your org. Within seconds the broker logs `connected`, then one `connection` line per request.
+4. **Register the key** with Straiker: send the `agent_key` to your Straiker contact, who registers it for your org
+   (there is no self-service page yet). Within seconds the broker logs `connected`, then one `connection` line per request.
    More apps: add each host to `--allow` and restart. For availability, run a second broker and register both keys.
 
 ## Configuration
@@ -104,7 +104,7 @@ See [config.example.yaml](config.example.yaml).
 |---|---|---|---|
 | `--org` | `BROKER_TENANT` | `tenant` | required |
 | `--allow host[:port]` (repeat; port 443 if omitted) | `BROKER_ALLOW` (comma-separated) | `allow` | required |
-| `--env` | `BROKER_ENV` | `env` | `dev` (until production is built in) |
+| `--env` | `BROKER_ENV` | `env` | `prod` (`stage` and `dev` are for Straiker's own testing) |
 | `--relay` | `BROKER_RELAY` | `relay` | the environment's relay |
 | `--host-key` | `BROKER_HOST_KEY` | `host_key` | the environment's pinned key |
 | `--state-dir` | `BROKER_STATE_DIR` | `state_dir` | per user (below) |
