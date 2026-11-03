@@ -27,7 +27,7 @@ var profile = &config.Profile{
 	},
 	DefaultEnv:   "prod",
 	TargetSuffix: "brk.straiker.ai",
-	Register:     "give it to your Straiker contact, who registers it for your org",
+	Register:     "register it with Straiker (for MCP scans: straiker mcp tunnel create --agent-key <key>; otherwise your Straiker contact)",
 	ConfigFile:   "/etc/straiker/broker.yaml",
 	SystemState:  "/var/lib/straiker-broker",
 }

@@ -90,8 +90,9 @@ sleeps, or a virtual desktop that resets at logoff, drops the connection.
    and logs it (`{"event":"identity", ... "agent_key":"AAAAC3Nz..."}`). Until step 4 it logs `waiting` once a
    minute: expected. The key survives restarts and upgrades; it changes only if the state directory is lost.
 
-4. **Register the key** with Straiker: send the `agent_key` to your Straiker contact, who registers it for your org
-   (there is no self-service page yet). Within seconds the broker logs `connected`, then one `connection` line per request.
+4. **Register the key** with Straiker. For MCP scans, the Straiker CLI does it:
+   `straiker mcp tunnel create --name <host>.brk.straiker.ai --agent-key '<agent_key>' --port <port>` registers the
+   broker, declares the target and grants it to Surveyor. Otherwise, send the `agent_key` to your Straiker contact. Within seconds the broker logs `connected`, then one `connection` line per request.
    More apps: add each host to `--allow` and restart. For availability, run a second broker and register both keys.
 
 ## Configuration
