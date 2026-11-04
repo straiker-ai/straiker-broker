@@ -197,17 +197,34 @@ One JSON object per line, also printed to stdout:
 | `disconnected` | a link dropped, after `up_s` seconds up; it reconnects with backoff |
 | `diagnosis` | once per outage, when the relay cannot be reached: where the path stops, and the fix |
 
+## Guarding NVIDIA OpenShell agents
+
+`straiker-broker guard` is a second, separate service in the same binary: an NVIDIA OpenShell supervisor middleware
+that checks sandboxed agents' model calls with Straiker Defend inline, denying a blocked request and cutting off a
+blocked tool call before the agent receives it. See [docs/guard.md](docs/guard.md).
+
+```sh
+straiker-broker guard ca --host guard.corp.internal > straiker-guard-ca.pem   # then register it with the gateway
+straiker-broker guard run --gateway-id <id> --gateway-jwks jwks.json --api-key-file guard.key
+```
+
 ## Development
 
 ```sh
 go test -race ./...
 go test ./pkg/config -run '^$' -fuzz FuzzParseForwards      # CI fuzzes it for 30s
+scripts/openshell-proto.sh                                   # regenerate the guard's OpenShell stubs (pinned)
 goreleaser release --snapshot --clean --skip=publish         # every archive, package and manifest
 ```
 
 The code under `pkg/` is product-neutral so other Straiker agents can build on it: `pkg/config` (a `Profile` names
 the product: environments, env prefix, paths), `pkg/identity`, `pkg/agent` (the link, the check) and `pkg/service`
-(Windows service, LaunchAgent, systemd unit, from a `Def`). `cmd/straiker-broker` is this product's profile.
+(Windows service, LaunchAgent, systemd unit, from a `Def`). `pkg/guard` is the guard's gateway-neutral core (the
+decision engine, config, runner), with `provider` (model calls), `answer` (streamed answers), `detect` (Straiker
+Defend) and `pki` (its CA). Each gateway is an adapter beside it, listed in `pkg/guard/gateways`: today
+`pkg/guard/openshell` (the supervisor-middleware services, `extauth` for gateway tokens, the generated `pb`). A new
+gateway adds its adapter and one entry there; tests keep the tunnel agent from importing the guard and the core from
+importing an adapter. `cmd/straiker-broker` is this product's profile.
 `testdata/contract.json` pins the names the broker and the relay must derive identically; the relay's tests
 (`straiker-ai/platform`, `services/broker/relay`) check the same file.
 
