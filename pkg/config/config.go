@@ -24,6 +24,7 @@ import (
 type Environment struct {
 	Relay   string // the relay's WebSocket URL
 	HostKey string // the relay's SSH host key, pinned; empty until published for that environment
+	API     string // the Straiker API's base URL, for the guard: https://api.<env>.straiker.ai
 }
 
 // Profile is what makes the agent one product's. The packages under pkg/ are shared by every Straiker agent

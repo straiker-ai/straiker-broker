@@ -10,18 +10,21 @@ var profile = &config.Profile{
 	Name:      "straiker-broker",
 	EnvPrefix: "BROKER_",
 	// Built in, so a customer configures only their org id and allowlist. Each carries the broker-relay's SSH host key
-	// for that environment, which the agent pins.
+	// for that environment, which the agent pins, and the API the guard calls.
 	Environments: map[string]config.Environment{
 		"dev": {
 			Relay:   "wss://broker.dev.straiker.ai",
+			API:     "https://api.dev.straiker.ai",
 			HostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGMwv9358a+DxXGIaL/IkmuhRdX4tQZEkGOxFJoNJX2J",
 		},
 		"stage": {
 			Relay:   "wss://broker.stage.straiker.ai",
+			API:     "https://api.stage.straiker.ai",
 			HostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEr6fa9H5wVGWwztKRYWRd7Ih3fIE/1omc0tXY058//u",
 		},
 		"prod": {
 			Relay:   "wss://broker.prod.straiker.ai",
+			API:     "https://api.prod.straiker.ai",
 			HostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOnEHRPDE0nEYTyisHLYPhmnb1JZIfiBqTR0BXDwON2x",
 		},
 	},

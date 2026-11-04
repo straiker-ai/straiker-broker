@@ -78,8 +78,8 @@ jobs:
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
-  # The parser that takes input from --allow, the config file and the environment, under Go's native fuzzer
-  # for 30s each. Their seed corpora already run in `go test`; this explores beyond them.
+  # The parsers of untrusted input - --allow, the config file and the environment; the guard's bearer tokens -
+  # under Go's native fuzzer for 30s each. Their seed corpora already run in `go test`; this explores beyond them.
   fuzz:
     runs-on: ubuntu-latest
     steps:
@@ -92,7 +92,8 @@ jobs:
       - name: fuzz
         run: |
           for target in \
-            pkg/config:FuzzParseForwards; do
+            pkg/config:FuzzParseForwards \
+            pkg/guard/openshell/extauth:FuzzVerify; do
             go test "./${target%%:*}" -run '^$' -fuzz "^${target#*:}\$" -fuzztime 30s
           done
 
