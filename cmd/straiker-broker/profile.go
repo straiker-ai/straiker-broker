@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/straiker-ai/straiker-broker/pkg/config"
+	"github.com/straiker-ai/straiker-broker/pkg/relays"
 	"github.com/straiker-ai/straiker-broker/pkg/service"
 )
 
@@ -9,24 +10,11 @@ import (
 var profile = &config.Profile{
 	Name:      "straiker-broker",
 	EnvPrefix: "BROKER_",
-	// Built in, so a customer configures only their org id and allowlist. Each carries the broker-relay's SSH host key
-	// for that environment, which the agent pins.
-	Environments: map[string]config.Environment{
-		"dev": {
-			Relay:   "wss://broker.dev.straiker.ai",
-			HostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGMwv9358a+DxXGIaL/IkmuhRdX4tQZEkGOxFJoNJX2J",
-		},
-		"stage": {
-			Relay:   "wss://broker.stage.straiker.ai",
-			HostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEr6fa9H5wVGWwztKRYWRd7Ih3fIE/1omc0tXY058//u",
-		},
-		"prod": {
-			Relay:   "wss://broker.prod.straiker.ai",
-			HostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOnEHRPDE0nEYTyisHLYPhmnb1JZIfiBqTR0BXDwON2x",
-		},
-	},
-	DefaultEnv:   "prod",
-	TargetSuffix: "brk.straiker.ai",
+	// Built in, so a customer configures only their org id and allowlist; shared with every agent that connects
+	// through Straiker Broker (pkg/relays).
+	Environments: relays.Environments(),
+	DefaultEnv:   relays.DefaultEnv,
+	TargetSuffix: relays.TargetSuffix,
 	Register:     "register it with Straiker (for MCP scans: straiker mcp tunnel create --agent-key <key>; otherwise your Straiker contact)",
 	ConfigFile:   "/etc/straiker/broker.yaml",
 	SystemState:  "/var/lib/straiker-broker",

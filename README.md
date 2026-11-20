@@ -206,8 +206,10 @@ goreleaser release --snapshot --clean --skip=publish         # every archive, pa
 ```
 
 The code under `pkg/` is product-neutral so other Straiker agents can build on it: `pkg/config` (a `Profile` names
-the product: environments, env prefix, paths), `pkg/identity`, `pkg/agent` (the link, the check) and `pkg/service`
-(Windows service, LaunchAgent, systemd unit, from a `Def`). `cmd/straiker-broker` is this product's profile.
+the product: environments, env prefix, paths), `pkg/identity`, `pkg/agent` (the link, the check), `pkg/service`
+(Windows service, LaunchAgent, systemd unit, from a `Def`) and `pkg/relays` (the broker's relays, their pinned host
+keys and the target domain, for any agent that connects through Straiker Broker). `cmd/straiker-broker` is this
+product's profile.
 `testdata/contract.json` pins the names the broker and the relay must derive identically; the relay's tests
 (`straiker-ai/platform`, `services/broker/relay`) check the same file.
 
