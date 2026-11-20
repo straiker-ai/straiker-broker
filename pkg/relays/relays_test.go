@@ -16,6 +16,9 @@ func TestEveryEnvironmentPinsARelayKey(t *testing.T) {
 		if !strings.HasPrefix(e.Relay, "wss://broker.") || !strings.HasSuffix(e.Relay, ".straiker.ai") {
 			t.Errorf("%s: relay %q", name, e.Relay)
 		}
+		if e.API != "https://api."+name+".straiker.ai" {
+			t.Errorf("%s: api %q", name, e.API)
+		}
 		if _, _, _, _, err := ssh.ParseAuthorizedKey([]byte(e.HostKey)); err != nil {
 			t.Errorf("%s: host key does not parse: %v", name, err)
 		}

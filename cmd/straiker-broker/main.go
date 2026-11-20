@@ -42,6 +42,8 @@ Usage:
                                           macOS LaunchAgent, or Linux systemd user service
   straiker-broker service status          whether the service runs
   straiker-broker service uninstall       remove the service (the key stays)
+  straiker-broker guard run|ca|service    check NVIDIA OpenShell sandboxes' model calls with Straiker
+                                          Defend (straiker-broker guard help)
   straiker-broker version                 print the version
 
 Quick start:
@@ -52,7 +54,11 @@ variables, which override the config file (-c, default %s).
 `
 
 func main() {
-	if code, ok := service.RunIfService(serviceDef, func(ctx context.Context) int {
+	def := serviceDef
+	if len(os.Args) > 1 && os.Args[1] == "guard" {
+		def = guardServiceDef
+	}
+	if code, ok := service.RunIfService(def, func(ctx context.Context) int {
 		return run(ctx, os.Args[1:], os.Stdout, os.Stderr)
 	}); ok {
 		os.Exit(code)
@@ -73,6 +79,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runAgent(ctx, cmd, args, stdout, stderr)
 	case "service":
 		return serviceCmd(args, stdout, stderr)
+	case "guard":
+		return guardCmd(ctx, args, stdout, stderr)
 	case "key":
 		return printKey(args, stdout, stderr)
 	case "version":
