@@ -218,8 +218,9 @@ goreleaser release --snapshot --clean --skip=publish         # every archive, pa
 ```
 
 The code under `pkg/` is product-neutral so other Straiker agents can build on it: `pkg/config` (a `Profile` names
-the product: environments, env prefix, paths), `pkg/identity`, `pkg/agent` (the link, the check) and `pkg/service`
-(Windows service, LaunchAgent, systemd unit, from a `Def`). `pkg/guard` is the guard's gateway-neutral core (the
+the product: environments, env prefix, paths), `pkg/identity`, `pkg/agent` (the link, the check), `pkg/service`
+(Windows service, LaunchAgent, systemd unit, from a `Def`) and `pkg/relays` (the broker's relays, their pinned host
+keys, the Straiker API and the target domain, for any agent that connects through Straiker Broker). `pkg/guard` is the guard's gateway-neutral core (the
 decision engine, config, runner), with `provider` (model calls), `answer` (streamed answers), `detect` (Straiker
 Defend) and `pki` (its CA). Each gateway is an adapter beside it, listed in `pkg/guard/gateways`: today
 `pkg/guard/openshell` (the supervisor-middleware services, `extauth` for gateway tokens, the generated `pb`). A new
